@@ -140,10 +140,20 @@
           </execution>
         </executions>
       </plugin>
-
+    <plugin>
+      <artifactId>maven-eclipse-plugin</artifactId>
+      <configuration>
+        <additionalProjectnatures>
+          <projectnature>
+            org.eclipse.jdt.groovy.core.groovyNature
+             </projectnature>
+        </additionalProjectnatures>
+      </configuration>
+    </plugin>
       <plugin>
         <groupId>org.codehaus.groovy.maven</groupId>
         <artifactId>gmaven-plugin</artifactId>
+        <version>1.0-rc-5</version>
         <executions>
           <execution>
             <goals>
