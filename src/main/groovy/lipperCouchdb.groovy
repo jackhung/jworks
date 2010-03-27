@@ -188,7 +188,7 @@ class LipperCDB {
 	def byDomicile(domicileId) {
 		try {
 			def resp = client.get(
-					path: "$dbname/_design/shows/_view/list_by_domicile",
+					path: "$dbname/_design/shows/_view/list_by_DomicileCode",
 					query: [key: "\"$domicileId\""]
 					)
 			resp?.data
@@ -342,52 +342,13 @@ class LipperCDB {
 		}
 	}
 	
-	def countReducer = """
-    	function(keys, values, rereduce) {
-		return sum(values)
-	}
-	"""
-	def countMap(docType, fname) {
-		"""function(doc) {
-			if (doc.docType == "$docType")
-				if (doc.${fname})
-					emit(doc.${fname}, 1);
-		}
-		""" as String
-	}
-	def byMap(docType, fname) {
-		"""function(doc) {
-    		if (doc.docType == "$docType")
-				if (doc.${fname})
-					emit(doc.${fname}, true) 
-		}
-		""" as String
-	}
 	def byCompanyCodeMap = """
 		function(doc) {
 			if (doc.docType == "Company")
 				emit(doc.CompanyCode, doc.ShortName)
 		}
 	"""
-	// http://localhost:5984/funds/_design/shows/_view/fund_relations?startkey=["60000015"]&endkey=["60000015",{}]
-	def fundRelationsMap = """
-function(doc) {
-	if (doc.docType == "Fund")
-	    emit([doc.LipperId, "0"], true)
-	else if (doc.docType == "Asset") 
-		emit([doc.LipperId, "asset"], true)
-	else if (doc.docType == "AssetStat")
-		emit([doc.LipperId, "assetStat"], true)
-	else if (doc.docType =="AssetTechnicalAnalysis")
-		emit([doc.LipperId, "assetTechAnalysis"], true)
-	else if (doc.docType == "FundCompany")
-	    emit([doc.LipperId, "company"], true)
-	else if (doc.docType == "FundExtra")
-		emit([doc.LipperId, "fundExtra"], true)
-	else if (doc.docType == "FundLipperScore")
-		emit([doc.LipperId, "fundLipperScore"], true)
-}
-	"""
+
 	def byTotRet5YrMap = """
 		function(doc) {
 		  if (doc.docType == "FundLipperScore" && doc.TOTRET5YR)
@@ -427,33 +388,47 @@ function(head, req) {
 	}
 }
 	"""
-		
-	def readMRFile = { fpath ->
-		def f = new File(fpath)
+	
+	def couchViews = "src/main/couchViews/"
+	
+	def readMRFile = { fname ->
+		def ret = [:]
+		def f = new File(couchViews + fname)
 		def ftext = f.text
 		def m = ftext =~ /(?ms)\/\/map>>(.*?)\/\/map<</
-		def map = m[0][1]
+		ret.map = m[0][1]
 		m = ftext =~ /(?ms)\/\/reduce>>(.*?)\/\/reduce<</
-		def reduce = m[0][1]
-		[map: map, reduce: reduce]
+		if (m) {
+			ret.reduce = m[0][1]
+		}
+		ret
 	}
 	
+	def readCountingMRFile = {docType, fname ->
+		def map = readMRFile("countingMapReduce.js")
+		def binding = [docType: docType, fname: fname]
+		def eng = new groovy.text.SimpleTemplateEngine()
+		map.map = eng.createTemplate(map.map).make(binding).toString()
+		map.reduce = eng.createTemplate(map.reduce).make(binding).toString()
+		map
+	}
+	
+	def addCountingViews = {docType, fname, design ->
+		def map = readCountingMRFile(docType, fname)
+		design.views."count_by_${fname}" = map
+		design.views."list_by_${fname}" = [map: map.map]
+	}
 	
 	def designViews() {
 		def design = [_id : "_design/domicile", language : "javascript", views : [:], shows : [:], lists: [:]]
-		design.views.count_domicile = [map: countMap("Fund","DomicileCode"), reduce: countReducer]
-		design.views.list_by_domicile = [map : byMap("Fund", "DomicileCode")]
-		design.views.count_globalClass = [map: countMap("Fund", "GlobalClassCode"), reduce: countReducer]
-		design.views.list_by_globalClass = [map : byMap("Fund", "GlobalClassCode")]
-		design.views.count_localClass = [map: countMap("Fund", "LocalClassCode"), reduce: countReducer]
-		design.views.list_by_localClass = [map : byMap("Fund", "LocalClassCode")]
-		design.views.count_managerBM = [map: countMap("FundExtra", "ManagerBMLipperId"), reduce: countReducer]
-		design.views.list_by_managerBM = [map : byMap("FundExtra", "ManagerBMLipperId")]
+		addCountingViews("Fund", "DomicileCode", design)
+		addCountingViews("Fund", "GlobalClassCode", design)
+		addCountingViews("Fund", "LocalClassCode", design)
+		addCountingViews("Fund", "ManagerBMLipperId", design)
 		design.views.list_by_companyCode = [map : byCompanyCodeMap]
 		design.views.list_by_totRet5Yr = [map: byTotRet5YrMap]
-		//design.views.list_by_PCT3MGlobal = [map: rankByPCT3MGlobalMap]
-		design.views.fund_relations = [map: fundRelationsMap]
-		design.views.pct1m_by_globalClass = readMRFile("src/main/couchViews/rankAssetStatByGlobalClass.js")
+		design.views.fund_relations = readMRFile("fundRelations.js")  //[map: fundRelationsMap]
+		design.views.pct1m_by_globalClass = readMRFile("rankAssetStatByGlobalClass.js")
 		design.shows.summary = summaryShow
 		design.shows.detail = """function(doc, req) {\n return 'Hello World'}\n"""
 		design.lists.fund_summary = listFundSummary
@@ -577,11 +552,6 @@ class BulkDocCollection {
  - IncomeYTM	Income1Y	
  - PriceCode2, PriceLC2, Price2
  ==================================== map example =====================================
- function(doc) {
- if (doc.DomicileCode == "LUX") {
- emit(doc.DomicileCode, doc);
- }
- }
  curl -X GET -H "Content-Type: application/json" 
  "http://localhost:5984/funds/_design/LUX/_view/domcile_lux?limit=2&skip=200"
  {"_id":"_design/domiciles","_rev":"1-d8432d48980584c1f131c59e5c2325f7","language":"javascript",

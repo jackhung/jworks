@@ -1,6 +1,28 @@
 Feature: Lipper Zip Datasource
   Provide access to zip data
 
+  Scenario: Reading data from a lipper zip file
+    Given the zip file 'Zh070411.zip'
+    When I open a file with name 'Fund.txt'
+    Then I should be able to read a data line
+    And The line should contains 'LipperId'
+    And I should be able to read a data line
+    And The line should contains '60000008'
+
+  Scenario: Reading records from a lipper zip file
+    Given the zip file 'Zh070411.zip'
+    When I get the tabData for 'Fund.txt'
+    Then The definition should include field 'LipperId'
+    And I should be able to read a record
+    And The field 'LipperId' should equals '60000008'
+
+  Scenario: Create and delete the funds DB
+    Given a connection to CouchDB
+    When I delete and create the funds DB
+    Then I should be able to get the DB info
+    And I load fund records from 'Zh070411.zip':'Fund.txt' to the DB
+    And I should be able to get the fund with LipperId equals '60000009'
+    
   Scenario: Load design document
     Given a connection to CouchDB
     When I load a design document
